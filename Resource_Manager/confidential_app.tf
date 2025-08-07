@@ -1,5 +1,5 @@
 resource "oci_identity_domains_app" "conf_app" {
-  idcs_endpoint = var.idcs_endpoint
+  idcs_endpoint = var.identity_domain_endpoint
   display_name = "${var.trust_name}conf_app"
   active        = true
   schemas = ["urn:ietf:params:scim:schemas:oracle:idcs:App"]

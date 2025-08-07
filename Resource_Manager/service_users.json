@@ -1,0 +1,20 @@
+[
+  {
+    "username": "service1@example.com",
+    "claim_name": "sub",
+    "claim_value": "service1-subject",
+    "operator": "eq"
+  },
+  {
+    "username": "service2@example.com",
+    "claim_name": "email",
+    "claim_value": "service2@example.com",
+    "operator": "co"
+  },
+  {
+    "username": "admin@example.com",
+    "claim_name": "email",
+    "claim_value": "admin@example.com",
+    "operator": "eq"
+  }
+]
