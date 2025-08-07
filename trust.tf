@@ -1,37 +1,52 @@
 locals {
-  impersonation_emails = [
+  # 1. Parse and clean (strip \r, trim whitespace, skip empty)
+  service_usernames = [
     for email in split("\n", trim(file("${path.module}/service_users.txt"), "\n")) :
       trim(replace(email, "\r", ""), " ")
     if trim(replace(email, "\r", ""), " ") != ""
   ]
 }
 
-
-# Lookup each service user in IDCS by email
+# 2. Lookup users in IDCS
 data "oci_identity_domains_users" "impersonated_users" {
-  for_each      = toset(local.impersonation_emails)
+  for_each      = toset(local.service_usernames)
   idcs_endpoint = var.idcs_endpoint
   user_filter   = "userName eq \"${each.key}\""
 }
 
-# List emails that could not be matched in IDCS (for error handling)
+# 3. Determine which users are missing
 locals {
   missing_users = [
-    for email in local.impersonation_emails : email
+    for email in local.service_usernames : email
     if length(try(data.oci_identity_domains_users.impersonated_users[email].users, [])) == 0
   ]
 }
 
-# Fail early if any user is missing in IDCS
-resource "null_resource" "fail_if_missing" {
-  count = length(local.missing_users) > 0 ? 1 : 0
+# 4. Create missing service users
+resource "oci_identity_domains_user" "service_users" {
+  for_each      = toset(local.missing_users)
+  idcs_endpoint = var.idcs_endpoint
+  schemas       = ["urn:ietf:params:scim:schemas:core:2.0:User"]
+  user_name     = each.key
 
-  provisioner "local-exec" {
-    command = "echo 'ERROR: Missing users: ${join(", ", local.missing_users)}' && exit 1"
+  urnietfparamsscimschemasoracleidcsextensionuser_user {
+    service_user = true
   }
 }
 
-# Main trust resource using the correct client ID reference
+# 5. Compose the final user ID map: lookup found users, or use created
+locals {
+  impersonated_user_ids = {
+    for email in local.service_usernames :
+      email => (
+        length(try(data.oci_identity_domains_users.impersonated_users[email].users, [])) > 0
+        ? data.oci_identity_domains_users.impersonated_users[email].users[0].id
+        : oci_identity_domains_user.service_users[email].id
+      )
+  }
+}
+
+# 6. Main trust resource
 resource "oci_identity_domains_identity_propagation_trust" "token_exchange_trust" {
   idcs_endpoint        = var.idcs_endpoint
   issuer               = var.issuer
@@ -45,20 +60,15 @@ resource "oci_identity_domains_identity_propagation_trust" "token_exchange_trust
   subject_type         = "User"
   description          = "Created by Terraform"
 
-  # Create impersonation rules for each valid service user
-  dynamic "impersonation_service_users" {
-    for_each = local.impersonation_emails
-    content {
-      rule  = "sub eq ${impersonation_service_users.value}"
-      value = data.oci_identity_domains_users.impersonated_users[impersonation_service_users.value].users[0].id
-    }
-  }
-
-  # Ensure trust is not created if users are missing
-  depends_on = [null_resource.fail_if_missing]
+	dynamic "impersonation_service_users" {
+	  for_each = local.service_usernames
+	  content {
+		rule  = "${var.jwt_claim_name} ${var.jwt_claim_operator} ${impersonation_service_users.value}"
+		value = local.impersonated_user_ids[impersonation_service_users.value]
+	  }
+	}
 }
 
-# Output trust OCID
 output "trust_id" {
   value = oci_identity_domains_identity_propagation_trust.token_exchange_trust.id
 }
