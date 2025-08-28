@@ -1,0 +1,21 @@
+Blog Link - https://blogs.oracle.com/undefined/post/automating-oci-workload-identity-federation-with-terraform-and-resource-manager
+
+variables.tf
+  Defines inputs for the module: create_service_users, identity_domain_endpoint, issuer, trust_name, and public_key_endpoint.
+  These values drive user creation and the trust setup.
+
+service_users.json
+  List of service users and match rules (username, claim_name, claim_value, operator = eq/co).
+  Used by Terraform to create users and to build impersonation rules.
+
+service_users.tf
+  Reads and cleans service_users.json, filters empty entries, and normalizes the operator.
+  If create_service_users is true, it creates each as an service user.
+
+trust.tf
+  Collects created user IDs, validates operators, and checks for missing users.
+  Creates an Identity Propagation Trust with dynamic impersonation rules that map JWT claims to user IDs; outputs trust_id.
+
+confidential_app.tf
+  Creates a confidential OAuth app (client credentials grant) in the Identity Domain using a base template.
+  Exposes the created app’s client identifier via the client_id output.
